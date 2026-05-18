@@ -117,22 +117,22 @@ export default function RootLayout({ children }) {
         </ThemeProvider>
 
         {/* Umami Analytics */}
-        <Script
+        {/* <Script
           id="umami-analytics"
           src="https://cloud.umami.is/script.js"
           data-website-id="b5f3d51f-b071-48a6-a70b-2346af1f7625"
           strategy="afterInteractive"
-        />
+        /> */}
 
         {/* Google Analytics — disabled (503 on collect endpoint; re-enable if GA4 is reconfigured) */}
-        <Script
+        {/* <Script
           id="google-analytics-src"
           src="https://www.googletagmanager.com/gtag/js?id=G-Z4H9RTYGS4"
           strategy="afterInteractive"
         />
         <Script id="google-analytics-init" strategy="afterInteractive">
           {`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-Z4H9RTYGS4');`}
-        </Script>
+        </Script> */}
 
         {/* Usercentrics CMP — disabled (loads 10 requests; re-enable with lazyOnload when consent UX is needed) */}
         {/* <Script

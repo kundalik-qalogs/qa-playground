@@ -42,6 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTracker } from "../_components/StudyTrackerProvider";
 
 const LOCAL_DEEPGRAM_KEY = "qa_interview_deepgram_key";
+const DEEPGRAM_AUDIO_SAMPLE_RATE = 24000;
 const DEFAULT_FOCUS =
   "Ask one interview question at a time, wait for my answer, then give concise feedback before the next question. Mix practical QA, automation, and follow-up questions.";
 
@@ -65,6 +66,22 @@ function formatDate(value) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatInterviewElapsed(session) {
+  if (!session?.startedAt) return `0 min / ${session?.durationMinutes ?? 0} min`;
+
+  const startedMs = new Date(session.startedAt).getTime();
+  const endedMs = session.endedAt ? new Date(session.endedAt).getTime() : Date.now();
+  const elapsedMinutes = Math.max(
+    0,
+    Math.min(
+      Number(session.durationMinutes || 0),
+      Math.ceil((endedMs - startedMs) / 60000),
+    ),
+  );
+
+  return `${elapsedMinutes} min / ${session.durationMinutes} min`;
 }
 
 function updateUrl(tab, id = "") {
@@ -98,6 +115,9 @@ export default function InterviewPracticePage() {
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState("");
+  const [selectedSessionMessages, setSelectedSessionMessages] = useState([]);
+  const [selectedSessionLoading, setSelectedSessionLoading] = useState(false);
+  const [selectedSessionError, setSelectedSessionError] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [hasLocalKey, setHasLocalKey] = useState(false);
   const [maskedKey, setMaskedKey] = useState("");
@@ -118,6 +138,7 @@ export default function InterviewPracticePage() {
   const captureContextRef = useRef(null);
   const captureProcessorRef = useRef(null);
   const playbackContextRef = useRef(null);
+  const nextPlaybackTimeRef = useRef(0);
 
   const refreshLocalKeyState = useCallback(() => {
     const stored = window.localStorage.getItem(LOCAL_DEEPGRAM_KEY) || "";
@@ -176,6 +197,39 @@ export default function InterviewPracticePage() {
     }
   }, [user]);
 
+  const fetchSessionDetails = useCallback(
+    async (id) => {
+      if (!user || !id) return;
+
+      setSelectedSessionLoading(true);
+      setSelectedSessionError("");
+      try {
+        const res = await fetch(`/api/interview-practice/sessions/${id}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("Failed to load session details");
+        const data = await res.json();
+        setSelectedSessionMessages(data.messages || []);
+        if (data.session) {
+          setSessions((prev) =>
+            prev.map((session) =>
+              session.id === data.session.id ? data.session : session,
+            ),
+          );
+          if (currentSession?.id === data.session.id) {
+            setCurrentSession(data.session);
+          }
+        }
+      } catch {
+        setSelectedSessionMessages([]);
+        setSelectedSessionError("Could not load transcript for this session.");
+      } finally {
+        setSelectedSessionLoading(false);
+      }
+    },
+    [currentSession?.id, user],
+  );
+
   useEffect(() => {
     refreshLocalKeyState();
     syncTabFromUrl();
@@ -187,6 +241,12 @@ export default function InterviewPracticePage() {
     fetchUsage();
     fetchSessions();
   }, [fetchUsage, fetchSessions]);
+
+  useEffect(() => {
+    if (activeTab === "analytics" && selectedSessionId) {
+      fetchSessionDetails(selectedSessionId);
+    }
+  }, [activeTab, fetchSessionDetails, selectedSessionId]);
 
   const canUsePlatformKey = (usage?.platformFreeInterviewsRemaining ?? 0) > 0;
   const requiresLocalKey = Number(durationMinutes) === 15 || !canUsePlatformKey;
@@ -320,30 +380,7 @@ export default function InterviewPracticePage() {
 
       socket.onopen = () => {
         setConnectionStatus("Connected");
-        setAgentStatus("Starting agent");
-        const localKey =
-          websocket?.keySource === "USER_LOCAL"
-            ? window.localStorage.getItem(LOCAL_DEEPGRAM_KEY) || ""
-            : "";
-        socket.send(
-          JSON.stringify({
-            type: "Start",
-            ...(localKey ? { deepgramApiKey: localKey } : {}),
-          }),
-        );
-        startMicrophoneCapture(socket).catch((error) => {
-          setMicStatus("Mic unavailable");
-          setTranscriptMessages((prev) => [
-            ...prev,
-            {
-              id: `mic-${Date.now()}`,
-              role: "SYSTEM",
-              content:
-                error?.message ||
-                "Microphone capture could not be started in this browser.",
-            },
-          ]);
-        });
+        setAgentStatus("Waiting for validation");
       };
 
       socket.onmessage = (event) => {
@@ -360,10 +397,34 @@ export default function InterviewPracticePage() {
         }
 
         if (message.type === "SessionValidated") {
-          setAgentStatus("Session validated");
+          setAgentStatus("Starting agent");
+          if (message.session) setCurrentSession(message.session);
+          const localKey =
+            websocket?.keySource === "USER_LOCAL"
+              ? window.localStorage.getItem(LOCAL_DEEPGRAM_KEY) || ""
+              : "";
+          socket.send(
+            JSON.stringify({
+              type: "Start",
+              ...(localKey ? { deepgramApiKey: localKey } : {}),
+            }),
+          );
         }
         if (message.type === "DeepgramConnected") {
           setAgentStatus("Listening");
+          startMicrophoneCapture(socket).catch((error) => {
+            setMicStatus("Mic unavailable");
+            setTranscriptMessages((prev) => [
+              ...prev,
+              {
+                id: `mic-${Date.now()}`,
+                role: "SYSTEM",
+                content:
+                  error?.message ||
+                  "Microphone capture could not be started in this browser.",
+              },
+            ]);
+          });
         }
         if (message.type === "Transcript" && message.message) {
           setTranscriptMessages((prev) => [...prev, message.message]);
@@ -407,6 +468,7 @@ export default function InterviewPracticePage() {
       wsRef.current.close(1000, "user_ended");
     }
     wsRef.current = null;
+    nextPlaybackTimeRef.current = 0;
   }, []);
 
   const stopMicrophoneCapture = useCallback(() => {
@@ -432,7 +494,9 @@ export default function InterviewPracticePage() {
 
       const AudioContextClass =
         window.AudioContext || window.webkitAudioContext;
-      const audioContext = new AudioContextClass({ sampleRate: 24000 });
+      const audioContext = new AudioContextClass({
+        sampleRate: DEEPGRAM_AUDIO_SAMPLE_RATE,
+      });
       captureContextRef.current = audioContext;
 
       const source = audioContext.createMediaStreamSource(stream);
@@ -454,11 +518,17 @@ export default function InterviewPracticePage() {
   const playPcmAudio = useCallback((arrayBuffer) => {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!playbackContextRef.current) {
-      playbackContextRef.current = new AudioContextClass({ sampleRate: 24000 });
+      playbackContextRef.current = new AudioContextClass({
+        sampleRate: DEEPGRAM_AUDIO_SAMPLE_RATE,
+      });
     }
     const audioContext = playbackContextRef.current;
     const pcm = new Int16Array(arrayBuffer);
-    const audioBuffer = audioContext.createBuffer(1, pcm.length, 24000);
+    const audioBuffer = audioContext.createBuffer(
+      1,
+      pcm.length,
+      DEEPGRAM_AUDIO_SAMPLE_RATE,
+    );
     const channel = audioBuffer.getChannelData(0);
     for (let i = 0; i < pcm.length; i += 1) {
       channel[i] = Math.max(-1, Math.min(1, pcm[i] / 32768));
@@ -466,7 +536,15 @@ export default function InterviewPracticePage() {
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioContext.destination);
-    source.start();
+
+    const leadTime = 0.08;
+    const currentTime = audioContext.currentTime;
+    if (nextPlaybackTimeRef.current < currentTime + leadTime) {
+      nextPlaybackTimeRef.current = currentTime + leadTime;
+    }
+
+    source.start(nextPlaybackTimeRef.current);
+    nextPlaybackTimeRef.current += audioBuffer.duration;
   }, []);
 
   useEffect(() => {
@@ -514,17 +592,6 @@ export default function InterviewPracticePage() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-9 h-9 rounded-lg bg-[#eff2ff] text-blue-600 flex items-center justify-center">
-              <Mic size={18} />
-            </div>
-            <Badge
-              variant="outline"
-              className="border-[#dbeafe] bg-white text-blue-600"
-            >
-              Voice interview
-            </Badge>
-          </div>
           <h1 className="text-[1.55rem] font-bold text-[#111827] m-0">
             Interview Practice
           </h1>
@@ -602,6 +669,8 @@ export default function InterviewPracticePage() {
           transcriptMessages={transcriptMessages}
           onEnd={handleEndSession}
           onBackToSetup={() => navigateTab("interview")}
+          onOpenHistory={() => navigateTab("history")}
+          onOpenAnalytics={(id) => navigateTab("analytics", id)}
         />
       )}
 
@@ -619,6 +688,9 @@ export default function InterviewPracticePage() {
         <AnalyticsView
           session={selectedSession}
           selectedSessionId={selectedSessionId}
+          messages={selectedSessionMessages}
+          messagesLoading={selectedSessionLoading}
+          messagesError={selectedSessionError}
           onOpenHistory={() => navigateTab("history")}
         />
       )}
@@ -792,7 +864,13 @@ function SessionView({
   transcriptMessages,
   onEnd,
   onBackToSetup,
+  onOpenHistory,
+  onOpenAnalytics,
 }) {
+  const liveTranscriptRef = useRef(null);
+  const isSessionActive = ["CREATED", "ACTIVE", "SUMMARIZING"].includes(
+    session?.status,
+  );
   const statusCards = [
     {
       label: "Connection",
@@ -812,6 +890,11 @@ function SessionView({
       icon: MessageSquareText,
     },
   ];
+
+  useEffect(() => {
+    if (!liveTranscriptRef.current) return;
+    liveTranscriptRef.current.scrollTop = liveTranscriptRef.current.scrollHeight;
+  }, [transcriptMessages.length]);
 
   return (
     <div className="space-y-4">
@@ -843,17 +926,30 @@ function SessionView({
                 <Badge variant="outline" className="bg-white">
                   {session.id}
                 </Badge>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="gap-2 text-red-600 hover:text-red-700"
-                  onClick={onEnd}
-                >
-                  <Square size={14} />
-                  End session
-                </Button>
+                {isSessionActive ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 text-red-600 hover:text-red-700"
+                    onClick={onEnd}
+                  >
+                    <Square size={14} />
+                    End session
+                  </Button>
+                ) : (
+                  <Badge className="bg-green-50 text-green-700 border border-green-200">
+                    Session closed
+                  </Badge>
+                )}
               </div>
             </div>
+            {!isSessionActive && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                This session is already {String(session.status).toLowerCase()}.
+                Live controls are disabled. Open History or Analytics to review
+                the completed attempt.
+              </div>
+            )}
           </section>
 
           <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -890,11 +986,35 @@ function SessionView({
               </div>
               <div className="rounded-lg border border-dashed border-[#d8dde5] bg-[#fafbfc] min-h-[300px] flex items-center justify-center px-6 text-center">
                 {transcriptMessages.length === 0 ? (
-                  <p className="text-sm text-gray-500 m-0">
-                    Waiting for Deepgram transcript events.
-                  </p>
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-500 m-0">
+                      {isSessionActive
+                        ? "Waiting for Deepgram transcript events."
+                        : "This session is no longer active."}
+                    </p>
+                    {!isSessionActive && (
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={onOpenHistory}
+                        >
+                          View history
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={() => onOpenAnalytics(session.id)}
+                        >
+                          View analytics
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <div className="w-full h-full max-h-[300px] overflow-y-auto space-y-3 text-left">
+                  <div
+                    ref={liveTranscriptRef}
+                    className="w-full h-full max-h-[300px] overflow-y-auto space-y-3 text-left pr-1"
+                  >
                     {transcriptMessages.map((message, index) => (
                       <div
                         key={message.id || `${message.sequence}-${index}`}
@@ -1022,7 +1142,22 @@ function HistoryView({ sessions, loading, error, onRefresh, onAnalytics }) {
   );
 }
 
-function AnalyticsView({ session, selectedSessionId, onOpenHistory }) {
+function AnalyticsView({
+  session,
+  selectedSessionId,
+  messages,
+  messagesLoading,
+  messagesError,
+  onOpenHistory,
+}) {
+  const analyticsTranscriptRef = useRef(null);
+
+  useEffect(() => {
+    if (!analyticsTranscriptRef.current) return;
+    analyticsTranscriptRef.current.scrollTop =
+      analyticsTranscriptRef.current.scrollHeight;
+  }, [messages.length]);
+
   if (!selectedSessionId) {
     return (
       <section className="bg-white border border-[#e9eaed] rounded-xl p-8 text-center">
@@ -1074,7 +1209,7 @@ function AnalyticsView({ session, selectedSessionId, onOpenHistory }) {
       </section>
 
       <section className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <Metric label="Duration" value={`${session.durationMinutes} min`} />
+        <Metric label="Interview time" value={formatInterviewElapsed(session)} />
         <Metric label="Questions" value={`${session.questionCount} / ${session.questionLimit}`} />
         <Metric label="Key source" value={session.keySource} />
         <Metric label="Ended" value={session.endedAt ? "Yes" : "No"} />
@@ -1105,6 +1240,81 @@ function AnalyticsView({ session, selectedSessionId, onOpenHistory }) {
               ? JSON.stringify(session.feedback)
               : "Structured feedback is pending for this session."}
           </div>
+        </div>
+      </section>
+
+      <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between mb-4">
+          <div>
+            <h3 className="text-base font-semibold text-[#1f2937] m-0">
+              Transcript
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Candidate and AI messages from this interview session.
+            </p>
+          </div>
+          <Badge variant="outline" className="bg-white">
+            {messages.length} messages
+          </Badge>
+        </div>
+
+        {messagesError && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle size={15} />
+            {messagesError}
+          </div>
+        )}
+
+        <div className="min-h-[260px] rounded-lg border border-[#e9eaed] bg-[#fafbfc] p-4">
+          {messagesLoading ? (
+            <div className="flex items-center justify-center min-h-[220px] text-sm text-gray-500">
+              <Loader2 size={16} className="animate-spin mr-2" />
+              Loading transcript...
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex items-center justify-center min-h-[220px] text-sm text-gray-500 text-center">
+              No transcript messages were saved for this session yet.
+            </div>
+          ) : (
+            <div
+              ref={analyticsTranscriptRef}
+              className="max-h-[420px] overflow-y-auto space-y-3 pr-1"
+            >
+              {messages.map((message) => {
+                const isUser = message.role === "USER";
+                const isAi = message.role === "INTERVIEWER";
+                const label = isUser ? "Candidate" : isAi ? "AI interviewer" : "System";
+                return (
+                  <div
+                    key={message.id}
+                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[82%] rounded-xl border px-4 py-3 ${
+                        isUser
+                          ? "border-blue-200 bg-blue-50 text-blue-950"
+                          : isAi
+                            ? "border-[#e5e7eb] bg-white text-[#1f2937]"
+                            : "border-amber-200 bg-amber-50 text-amber-900"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-1">
+                        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.7px] text-gray-400 m-0">
+                          {label}
+                        </p>
+                        <p className="text-[0.68rem] text-gray-400 m-0">
+                          {message.occurredAt ? formatDate(message.occurredAt) : ""}
+                        </p>
+                      </div>
+                      <p className="text-sm leading-relaxed m-0">
+                        {message.content}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
     </div>

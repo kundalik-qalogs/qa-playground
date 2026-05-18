@@ -89,12 +89,6 @@ wss.on("connection", async (socket, req) => {
     closeSession(INTERVIEW_END_REASONS.CONNECTION_CLOSED);
   }, CLIENT_READY_TIMEOUT_MS);
 
-  sendJson(socket, {
-    type: "SessionValidated",
-    session,
-    requiresUserKey: session.keySource === INTERVIEW_KEY_SOURCES.USER_LOCAL,
-  });
-
   socket.on("message", async (data, isBinary) => {
     if (ended) return;
 
@@ -225,6 +219,12 @@ wss.on("connection", async (socket, req) => {
     if (message.type === "End") {
       await closeSession(INTERVIEW_END_REASONS.USER_ENDED);
     }
+  });
+
+  sendJson(socket, {
+    type: "SessionValidated",
+    session,
+    requiresUserKey: session.keySource === INTERVIEW_KEY_SOURCES.USER_LOCAL,
   });
 
   socket.on("close", async () => {

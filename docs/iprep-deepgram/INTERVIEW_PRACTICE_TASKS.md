@@ -2,7 +2,7 @@
 
 > Created: 2026-05-18
 > Last updated: 2026-05-18
-> Status: Phase 5 Study Tracker UI complete; realtime websocket integration pending
+> Status: Phase 6 realtime websocket path complete; summary and analytics polish pending
 
 ## Status Legend
 
@@ -54,7 +54,7 @@
 - [x] **3.1** Add browser-only Deepgram key save/remove controls
 - [x] **3.2** Store user key in `localStorage`
 - [x] **3.3** Show whether local key exists without displaying full key
-- [ ] **3.4** Send local key only when opening a user-key websocket session
+- [x] **3.4** Send local key only when opening a user-key websocket session
 - [x] **3.5** Ensure no normal Next.js API persists or echoes the user key
 
 ## Phase 4 - Interview Utilities
@@ -80,21 +80,21 @@
 
 ## Phase 6 - Realtime Audio And Separate Websocket Service
 
-- [ ] **6.1** Port browser microphone capture helper
-- [ ] **6.2** Port PCM conversion/playback helper
-- [ ] **6.3** Add websocket client lifecycle
-- [~] **6.4** Add separate Node `ws` service
-- [ ] **6.5** Add origin/session-token validation
-- [ ] **6.6** Support platform-key sessions from server `.env`
-- [ ] **6.7** Support user-local-key sessions without persisting or logging the key
-- [ ] **6.8** Add payload, idle, duration, and question-limit guards
-- [ ] **6.9** Add transcript event forwarding/persistence integration
+- [x] **6.1** Port browser microphone capture helper
+- [x] **6.2** Port PCM conversion/playback helper
+- [x] **6.3** Add websocket client lifecycle
+- [x] **6.4** Add separate Node `ws` service
+- [x] **6.5** Add origin/session-token validation
+- [x] **6.6** Support platform-key sessions from server `.env`
+- [x] **6.7** Support user-local-key sessions without persisting or logging the key
+- [x] **6.8** Add payload, idle, duration, and question-limit guards
+- [x] **6.9** Add transcript event forwarding/persistence integration
 
 ## Phase 7 - Transcript, Summary, Feedback
 
-- [ ] **7.1** Persist transcript rows during or after session
-- [ ] **7.2** Count interviewer questions
-- [ ] **7.3** Trigger end behavior on duration or question limit
+- [x] **7.1** Persist transcript rows during or after session
+- [x] **7.2** Count interviewer questions
+- [x] **7.3** Trigger end behavior on duration or question limit
 - [ ] **7.4** Ask Deepgram agent for summary and feedback
 - [ ] **7.5** Store summary and structured feedback
 - [ ] **7.6** Render saved feedback for completed session
@@ -133,15 +133,17 @@ docs/iprep-deepgram/INTERVIEW_PRACTICE_TASKS.md
 
 - Prisma migration `20260518000000_add_interview_practice` has been applied and `prisma generate` has run successfully.
 - PNPM workspace and Turbo config have been added with root Next.js app kept in place.
-- `server/interview-ws` exists as a starter Node `ws` service with `/health`; Deepgram proxy/session validation is still pending.
+- `server/interview-ws` exists as a separate Node `ws` service with `/health`, Deepgram proxying, origin checks, session token validation, and transcript forwarding.
 - `packages/interview-core` exists with interview constants, platform-key usage helper, Deepgram settings builder, transcript event normalizer, and end-condition helper.
 - Common first-session interview agent guidelines are stored at `packages/interview-core/INTERVIEW_AGENT_GUIDELINES.md` for the websocket/session-start payload.
 - Phase 2 API routes are complete and compile in Next build. Creating a platform-key session increments `platformFreeInterviewsUsed`.
-- Phase 3 local key management UI is complete for save/remove/status. Passing the key to the websocket remains pending until the websocket client lifecycle is implemented.
+- Phase 3 local key management UI is complete for save/remove/status. User-owned keys are sent only through the active websocket start message for user-local sessions.
 - Phase 4 utilities are complete. `verifySessionToken()` is available in `lib/interview-practice/api.js` for upcoming websocket validation.
 - The `/study-tracker/interview-practice` route now has the Phase 5 setup form, session creation action, live status placeholders, transcript placeholder, feedback placeholder, buy-interviews placeholder, usage panel, and local-key panel.
-- `next.config.mjs` now allows same-origin microphone access with `microphone=(self)` while keeping camera and geolocation disabled.
+- Phase 6 realtime path is wired: browser mic capture, PCM send/playback, websocket client lifecycle, separate `ws` proxy, origin/session token validation, platform and user-local key support, transcript persistence, and duration/question-limit end checks.
+- The websocket service calls internal Next routes under `/api/interview-practice/ws/*`. Set the same `INTERVIEW_WS_INTERNAL_SECRET` in the Next app and websocket service in production.
+- `next.config.mjs` allows same-origin microphone access with `microphone=(self)` while keeping camera and geolocation disabled.
 - User-owned Deepgram keys are handled only in browser `localStorage` and active websocket payloads.
 - Existing app auth uses Better Auth via `auth.api.getSession({ headers })`.
 - Existing Study Tracker UI uses the shared shell at `app/(study)/study-tracker/layout.js`.
-- Current `next.config.mjs` has `Permissions-Policy` set to `microphone=()`, which must be changed before microphone capture can work.
+- Local websocket setup is represented in `.env` with `INTERVIEW_WS_URL`, `INTERVIEW_WS_PORT`, `INTERVIEW_API_BASE_URL`, `ALLOWED_ORIGINS`, and `INTERVIEW_AGENT_GUIDELINES_PATH`.

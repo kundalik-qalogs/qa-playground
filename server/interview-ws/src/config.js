@@ -1,7 +1,38 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, "../../..");
+
+loadEnvFile(resolve(repoRoot, ".env"));
+loadEnvFile(resolve(__dirname, "../.env"));
+
+function loadEnvFile(path) {
+  if (!existsSync(path)) return;
+
+  const contents = readFileSync(path, "utf8");
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex === -1) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    if (!key || process.env[key] !== undefined) continue;
+
+    process.env[key] = rawValue.replace(/^["']|["']$/g, "");
+  }
+}
+
 export function getConfig() {
-  const port = Number(process.env.PORT || process.env.INTERVIEW_WS_PORT || 3001);
-  const defaultGuidelinesPath =
-    "../../packages/interview-core/INTERVIEW_AGENT_GUIDELINES.md";
+  const port = Number(process.env.INTERVIEW_WS_PORT || process.env.PORT || 3001);
+  const defaultGuidelinesPath = resolve(
+    repoRoot,
+    "packages/interview-core/INTERVIEW_AGENT_GUIDELINES.md",
+  );
 
   return {
     host: process.env.HOST || "0.0.0.0",
@@ -23,6 +54,8 @@ export function getConfig() {
       "http://localhost:3000",
     internalSecret: process.env.INTERVIEW_WS_INTERNAL_SECRET || "",
     agentGuidelinesPath:
-      process.env.INTERVIEW_AGENT_GUIDELINES_PATH || defaultGuidelinesPath,
+      process.env.INTERVIEW_AGENT_GUIDELINES_PATH
+        ? resolve(repoRoot, process.env.INTERVIEW_AGENT_GUIDELINES_PATH)
+        : defaultGuidelinesPath,
   };
 }

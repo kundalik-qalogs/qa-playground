@@ -94,6 +94,15 @@ export const practiceElements = [
     footerTitle: "Practice Now",
   },
   {
+    title: "mDocks.dev",
+    slug: null,
+    cardId: "mdocks-dev",
+    logo: "/mainicons/selectable.svg",
+    description: "View Markdown files beautifully with a clean reader experience",
+    footerTitle: "Open mDocks.dev",
+    externalLink: "https://mdocks.dev",
+  },
+  {
     title: "File Upload",
     slug: "file-upload",
     logo: "/mainicons/download.svg",

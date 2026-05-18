@@ -75,11 +75,14 @@ export default function PracticeClientContent() {
         className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8"
       >
         {filtered.map((el, i) => {
-          const cardId = el.slug ?? "bank-app";
+          const cardId = el.cardId ?? el.slug ?? "bank-app";
+          const isExternalUrl = /^https?:\/\//.test(el.link);
           return (
             <Link
               key={i}
               href={el.link}
+              target={isExternalUrl ? "_blank" : undefined}
+              rel={isExternalUrl ? "noopener noreferrer" : undefined}
               prefetch={false}
               id={`card-link-${cardId}`}
               name={`card-link-${cardId}`}
@@ -126,28 +129,28 @@ export default function PracticeClientContent() {
         })}
       </div>
 
-      {/* Udemy Affiliate Callout Card */}
+      {/* mDocks.dev Callout Card */}
       {filtered.length > 0 && (
         <div className="mt-12 pt-8">
-          <div className="bg-gradient-to-r from-orange-600/10 via-amber-600/10 to-orange-600/10 dark:from-orange-600/20 dark:via-amber-600/20 dark:to-orange-600/20 border border-orange-200 dark:border-orange-800 rounded-2xl px-6 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+          <div className="bg-gradient-to-r from-blue-600/10 via-cyan-600/10 to-emerald-600/10 dark:from-blue-600/20 dark:via-cyan-600/20 dark:to-emerald-600/20 border border-blue-200 dark:border-blue-800 rounded-2xl px-6 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
             <div className="flex-1">
               <p className="text-base font-bold text-foreground mb-1">
-                Level Up with Udemy Courses
+                Make Markdown Look Beautiful
               </p>
               <p className="text-sm text-muted-foreground">
-                Learn Agentic AI – Build Multi-Agent Automation Workflows.
-                Master Selenium, Playwright, and Cypress automation with
-                comprehensive courses. Build real-world skills at your own pace.
+                Open README files, notes, guides, and technical docs in a clean
+                reader built for Markdown. Try mDocks.dev when raw `.md` files
+                deserve a polished view.
               </p>
             </div>
             <Link
-              href="https://trk.udemy.com/Pza9QN"
+              href="https://mdocks.dev"
               target="_blank"
               rel="noopener noreferrer"
               prefetch={false}
-              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold transition-colors no-underline shadow-sm shadow-orange-500/20 whitespace-nowrap sm:ml-auto"
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-colors no-underline shadow-sm shadow-blue-500/20 whitespace-nowrap sm:ml-auto"
             >
-              Explore Courses →
+              View Markdown Better &rarr;
             </Link>
           </div>
         </div>
