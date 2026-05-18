@@ -1,0 +1,17 @@
+{
+  "name": "@qa-playground/interview-ws",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "build": "node src/server.js --check-config",
+    "start": "node src/server.js",
+    "lint": "node src/server.js --check-config"
+  },
+  "dependencies": {
+    "@qa-playground/interview-core": "workspace:*",
+    "ws": "^8.20.0"
+  }
+}
+

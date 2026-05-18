@@ -25,30 +25,57 @@ enum ResourceType {
   OTHER
 }
 
+enum InterviewPlan {
+  FREE
+  PAID
+}
+
+enum InterviewKeySource {
+  PLATFORM
+  USER_LOCAL
+}
+
+enum InterviewStatus {
+  CREATED
+  ACTIVE
+  SUMMARIZING
+  COMPLETED
+  ENDED_BY_USER
+  FAILED
+}
+
+enum InterviewMessageRole {
+  SYSTEM
+  INTERVIEWER
+  USER
+}
+
 // Better-Auth required models
 
 model User {
-  id               String             @id @default(cuid())
-  name             String
-  email            String             @unique
-  emailVerified    Boolean            @default(false)
-  image            String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  role             Role               @default(USER)
-  sessions         Session[]
-  accounts         Account[]
-  resources        Resource[]
-  apiKeys          ApiKey[]
-  syllabi          UserSyllabus[]
-  topicProgress    TopicProgress[]
-  subtopicProgress SubtopicProgress[]
-  dailyTasks       DailyTask[]
-  habits           Habit[]
-  habitLogs        HabitLog[]
-  activityLogs     ActivityLog[]
-  telegramUser     TelegramUser?
-  notes            Note[]
+  id                String                     @id @default(cuid())
+  name              String
+  email             String                     @unique
+  emailVerified     Boolean                    @default(false)
+  image             String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  role              Role                       @default(USER)
+  sessions          Session[]
+  accounts          Account[]
+  resources         Resource[]
+  apiKeys           ApiKey[]
+  syllabi           UserSyllabus[]
+  topicProgress     TopicProgress[]
+  subtopicProgress  SubtopicProgress[]
+  dailyTasks        DailyTask[]
+  habits            Habit[]
+  habitLogs         HabitLog[]
+  activityLogs      ActivityLog[]
+  telegramUser      TelegramUser?
+  notes             Note[]
+  interviewProfile  UserInterviewProfile?
+  interviewSessions InterviewPracticeSession[]
 }
 
 model Resource {
@@ -223,6 +250,78 @@ model ActivityLog {
   createdAt  DateTime @default(now())
 
   @@index([userId, date])
+}
+
+// Interview Practice Feature
+
+// Per-user interview entitlement state. User-owned Deepgram keys are not stored in DB.
+model UserInterviewProfile {
+  id                         String        @id @default(cuid())
+  userId                     String        @unique
+  user                       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                       InterviewPlan @default(FREE)
+  platformFreeInterviewsUsed Int           @default(0)
+  createdAt                  DateTime      @default(now())
+  updatedAt                  DateTime      @updatedAt
+}
+
+// One row per interview attempt/session.
+model InterviewPracticeSession {
+  id                String                     @id @default(cuid())
+  userId            String
+  user              User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publicId          String                     @unique @default(cuid())
+  status            InterviewStatus            @default(CREATED)
+  keySource         InterviewKeySource
+  role              String
+  companyStyle      String
+  focus             String
+  durationMinutes   Int
+  questionLimit     Int
+  questionCount     Int                        @default(0)
+  deepgramRequestId String?
+  startedAt         DateTime?
+  endedAt           DateTime?
+  endReason         String?
+  summary           String?
+  feedback          Json?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  messages          InterviewPracticeMessage[]
+  tokens            InterviewSessionToken[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+}
+
+// Normalized transcript and agent/system events for each interview.
+model InterviewPracticeMessage {
+  id         String                   @id @default(cuid())
+  sessionId  String
+  session    InterviewPracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role       InterviewMessageRole
+  content    String
+  source     String                   @default("deepgram")
+  eventType  String?
+  sequence   Int
+  occurredAt DateTime                 @default(now())
+  rawEvent   Json?
+
+  @@unique([sessionId, sequence])
+  @@index([sessionId, occurredAt])
+}
+
+// Short-lived websocket tokens. Stores token hash only, never Deepgram keys.
+model InterviewSessionToken {
+  id        String                   @id @default(cuid())
+  sessionId String
+  session   InterviewPracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime                 @default(now())
+
+  @@index([sessionId])
 }
 
 // ─── Site Alert Feature ───────────────────────────────────────────────────────
