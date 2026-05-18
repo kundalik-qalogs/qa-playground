@@ -177,7 +177,7 @@ function FeedbackAccordion({ feedback }) {
   return (
     <Accordion
       type="multiple"
-      defaultValue={["strengths", "improvementAreas", "recommendedPractice"]}
+      defaultValue={["strengths"]}
       className="rounded-lg border border-[#e9eaed] bg-white px-3"
     >
       <AccordionItem value="strengths">
@@ -219,10 +219,15 @@ function ReviewPanel({
   const hasReview = Boolean(session?.summary || feedback);
   const isSummarizing = session?.status === "SUMMARIZING";
   const hasTranscript = messages.length > 0;
+  const isTerminal = ["COMPLETED", "ENDED_BY_USER", "FAILED"].includes(
+    session?.status,
+  );
+  const showUnavailable = !hasReview && !isSummarizing;
+  const canGenerate = showUnavailable && hasTranscript && isTerminal;
 
   return (
     <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <h3 className="text-base font-semibold text-[#1f2937] m-0">
             Interview Review
@@ -231,20 +236,22 @@ function ReviewPanel({
             Summary and structured feedback generated from the saved transcript.
           </p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          className="gap-2"
-          onClick={onGenerate}
-          disabled={generating || isSummarizing || !hasTranscript}
-        >
-          {generating || isSummarizing ? (
-            <Loader2 size={15} className="animate-spin" />
-          ) : (
-            <RefreshCw size={15} />
-          )}
-          {hasReview ? "Regenerate feedback" : "Generate feedback"}
-        </Button>
+        {canGenerate && (
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={onGenerate}
+            disabled={generating}
+          >
+            {generating ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <RefreshCw size={15} />
+            )}
+            Generate feedback
+          </Button>
+        )}
       </div>
 
       {(generating || isSummarizing) && (
@@ -254,9 +261,16 @@ function ReviewPanel({
         </div>
       )}
 
-      {!hasTranscript && (
+      {showUnavailable && !hasTranscript && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Feedback needs transcript messages before it can be generated.
+          Feedback was not generated because no transcript messages were saved for this session.
+        </div>
+      )}
+
+      {showUnavailable && hasTranscript && isTerminal && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <AlertCircle size={15} />
+          Feedback is not available for this session. It may not have generated because the review service was unavailable, configuration was missing, or generation was interrupted.
         </div>
       )}
 
@@ -264,6 +278,12 @@ function ReviewPanel({
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           <AlertCircle size={15} />
           {reviewError}
+        </div>
+      )}
+
+      {showUnavailable && hasTranscript && !isTerminal && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Feedback will appear here after the interview ends.
         </div>
       )}
 
