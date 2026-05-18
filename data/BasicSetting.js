@@ -4,7 +4,7 @@ export const basicDetails = {
     "Practice Selenium, Playwright, and Cypress automation testing with 22+ interactive UI elements, a Bank Demo app, and a QA Study Tracker. Free for QA engineers.",
   tagLine: "Learn, practice, and excel in automation testing.",
   websiteEmail: "kundalikjadhav5545@gmail.com",
-  websiteURL: "https://www.qaplayground.com",
+  websiteURL: "https://qaplayground.com",
 };
 
 export const allUrls = {

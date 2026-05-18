@@ -86,7 +86,7 @@ const jsonLd = {
         "Free QA automation testing playground with 22+ interactive UI elements, Bank Demo app, and QA Study Tracker for Selenium, Playwright, and Cypress practice.",
       potentialAction: {
         "@type": "SearchAction",
-        target: "https://www.qaplayground.com/practice",
+        target: "https://qaplayground.com/practice",
         "query-input": "required name=search_term_string",
       },
     },
@@ -111,8 +111,8 @@ const jsonLd = {
     {
       "@type": "Organization",
       name: "QA Playground",
-      url: "https://www.qaplayground.com",
-      logo: "https://www.qaplayground.com/mainicons/edit.svg",
+      url: "https://qaplayground.com",
+      logo: "https://qaplayground.com/mainicons/edit.svg",
       sameAs: [
         "https://www.youtube.com/@qaplayground",
         "https://twitter.com/qaplayground",
