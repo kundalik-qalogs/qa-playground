@@ -13,6 +13,11 @@
 - PNPM workspace and Turbo config are in place.
 - `server/interview-ws` exists as a starter separate Node `ws` service.
 - `packages/interview-core` exists with initial interview constants and platform-key usage helper.
+- Phase 2 Next.js API routes are complete for usage, session create/list/detail, and user-ended sessions.
+- Platform-key session creation increments `platformFreeInterviewsUsed`; user-owned keys are still never accepted by normal Next.js APIs.
+- Initial `/study-tracker/interview-practice` UI is in place with sidebar navigation, free usage display, and browser-only local Deepgram key save/remove/status controls.
+- Local Deepgram key transmission to the websocket is still pending Phase 6 websocket client work.
+- Phase 4 shared utilities are complete: Deepgram settings builder, transcript event normalization, timing-safe session token verification, end-condition helper, and platform-key usage policy.
 
 ## Phase 0 - Locked Decisions
 

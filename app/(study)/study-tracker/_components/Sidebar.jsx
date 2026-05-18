@@ -40,6 +40,12 @@ const NAV_ITEMS = [
     icon: "🔖",
     href: "/study-tracker/resources",
   },
+  {
+    id: "interview-practice",
+    label: "Interview Practice",
+    icon: "IV",
+    href: "/study-tracker/interview-practice",
+  },
 ];
 
 export default function Sidebar({ collapsed, onToggle }) {

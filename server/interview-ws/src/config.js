@@ -1,5 +1,7 @@
 export function getConfig() {
   const port = Number(process.env.PORT || process.env.INTERVIEW_WS_PORT || 3001);
+  const defaultGuidelinesPath =
+    "../../packages/interview-core/INTERVIEW_AGENT_GUIDELINES.md";
 
   return {
     host: process.env.HOST || "0.0.0.0",
@@ -15,6 +17,12 @@ export function getConfig() {
       .split(",")
       .map((origin) => origin.trim())
       .filter(Boolean),
+    interviewApiBaseUrl:
+      process.env.INTERVIEW_API_BASE_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3000",
+    internalSecret: process.env.INTERVIEW_WS_INTERNAL_SECRET || "",
+    agentGuidelinesPath:
+      process.env.INTERVIEW_AGENT_GUIDELINES_PATH || defaultGuidelinesPath,
   };
 }
-

@@ -2,7 +2,7 @@
 
 > Created: 2026-05-18
 > Last updated: 2026-05-18
-> Status: Foundation in progress - Prisma schema and monorepo skeleton complete
+> Status: Phase 5 Study Tracker UI complete; realtime websocket integration pending
 
 ## Status Legend
 
@@ -37,46 +37,46 @@
 
 ## Phase 2 - Usage And Session Routes
 
-- [ ] **2.1** Add `GET /api/interview-practice/usage`
-- [ ] **2.2** Add `POST /api/interview-practice/sessions`
-- [ ] **2.3** Add `GET /api/interview-practice/sessions`
-- [ ] **2.4** Add `GET /api/interview-practice/sessions/[id]`
-- [ ] **2.5** Add `PATCH /api/interview-practice/sessions/[id]/end`
-- [ ] **2.6** Add authenticated ownership checks
-- [ ] **2.7** Add duration validation for `10` and `15` only
-- [ ] **2.8** Add question limit validation for `5`, `7`, and `10` only
-- [ ] **2.9** Add free quota validation: first two free `10` minute platform-key interviews only
-- [ ] **2.10** Require user-local key mode after free quota or for `15` minute interviews
-- [ ] **2.11** Add short-lived websocket token creation
+- [x] **2.1** Add `GET /api/interview-practice/usage`
+- [x] **2.2** Add `POST /api/interview-practice/sessions`
+- [x] **2.3** Add `GET /api/interview-practice/sessions`
+- [x] **2.4** Add `GET /api/interview-practice/sessions/[id]`
+- [x] **2.5** Add `PATCH /api/interview-practice/sessions/[id]/end`
+- [x] **2.6** Add authenticated ownership checks
+- [x] **2.7** Add duration validation for `10` and `15` only
+- [x] **2.8** Add question limit validation for `5`, `7`, and `10` only
+- [x] **2.9** Add free quota validation: first two free `10` minute platform-key interviews only
+- [x] **2.10** Require user-local key mode after free quota or for `15` minute interviews
+- [x] **2.11** Add short-lived websocket token creation
 
 ## Phase 3 - LocalStorage Key UI
 
-- [ ] **3.1** Add browser-only Deepgram key save/remove controls
-- [ ] **3.2** Store user key in `localStorage`
-- [ ] **3.3** Show whether local key exists without displaying full key
+- [x] **3.1** Add browser-only Deepgram key save/remove controls
+- [x] **3.2** Store user key in `localStorage`
+- [x] **3.3** Show whether local key exists without displaying full key
 - [ ] **3.4** Send local key only when opening a user-key websocket session
-- [ ] **3.5** Ensure no normal Next.js API persists or echoes the user key
+- [x] **3.5** Ensure no normal Next.js API persists or echoes the user key
 
 ## Phase 4 - Interview Utilities
 
-- [ ] **4.1** Add Deepgram settings builder
-- [ ] **4.2** Add transcript event normalizer
-- [ ] **4.3** Add session token hash/verify helpers
-- [ ] **4.4** Add interview end-condition helper for duration/question limit
-- [~] **4.5** Add usage policy helper for platform-key vs user-local-key sessions
+- [x] **4.1** Add Deepgram settings builder
+- [x] **4.2** Add transcript event normalizer
+- [x] **4.3** Add session token hash/verify helpers
+- [x] **4.4** Add interview end-condition helper for duration/question limit
+- [x] **4.5** Add usage policy helper for platform-key vs user-local-key sessions
 
 ## Phase 5 - Study Tracker UI
 
-- [ ] **5.1** Add sidebar nav item for Interview Practice
-- [ ] **5.2** Add `/study-tracker/interview-practice/page.jsx`
-- [ ] **5.3** Add setup form with role, company style, focus, duration, and question limit
-- [ ] **5.4** Add free quota and local key status panels
-- [ ] **5.5** Add future "buy interviews" placeholder
-- [ ] **5.6** Add live status row
-- [ ] **5.7** Add transcript panel
-- [ ] **5.8** Add final summary/feedback panel
-- [ ] **5.9** Verify responsive layout in Study Tracker shell
-- [ ] **5.10** Update microphone permissions in security headers
+- [x] **5.1** Add sidebar nav item for Interview Practice
+- [x] **5.2** Add `/study-tracker/interview-practice/page.jsx`
+- [x] **5.3** Add setup form with role, company style, focus, duration, and question limit
+- [x] **5.4** Add free quota and local key status panels
+- [x] **5.5** Add future "buy interviews" placeholder
+- [x] **5.6** Add live status row
+- [x] **5.7** Add transcript panel
+- [x] **5.8** Add final summary/feedback panel
+- [x] **5.9** Verify responsive layout in Study Tracker shell
+- [x] **5.10** Update microphone permissions in security headers
 
 ## Phase 6 - Realtime Audio And Separate Websocket Service
 
@@ -117,6 +117,7 @@ prisma/migrations/20260518000000_add_interview_practice/migration.sql
 pnpm-workspace.yaml
 turbo.json
 packages/interview-core/**
+lib/interview-practice/api.js
 app/(study)/study-tracker/_components/Sidebar.jsx
 app/(study)/study-tracker/interview-practice/page.jsx
 app/api/interview-practice/**
@@ -133,7 +134,13 @@ docs/iprep-deepgram/INTERVIEW_PRACTICE_TASKS.md
 - Prisma migration `20260518000000_add_interview_practice` has been applied and `prisma generate` has run successfully.
 - PNPM workspace and Turbo config have been added with root Next.js app kept in place.
 - `server/interview-ws` exists as a starter Node `ws` service with `/health`; Deepgram proxy/session validation is still pending.
-- `packages/interview-core` exists with initial constants and platform-key usage helper; deeper interview utilities are still pending.
+- `packages/interview-core` exists with interview constants, platform-key usage helper, Deepgram settings builder, transcript event normalizer, and end-condition helper.
+- Common first-session interview agent guidelines are stored at `packages/interview-core/INTERVIEW_AGENT_GUIDELINES.md` for the websocket/session-start payload.
+- Phase 2 API routes are complete and compile in Next build. Creating a platform-key session increments `platformFreeInterviewsUsed`.
+- Phase 3 local key management UI is complete for save/remove/status. Passing the key to the websocket remains pending until the websocket client lifecycle is implemented.
+- Phase 4 utilities are complete. `verifySessionToken()` is available in `lib/interview-practice/api.js` for upcoming websocket validation.
+- The `/study-tracker/interview-practice` route now has the Phase 5 setup form, session creation action, live status placeholders, transcript placeholder, feedback placeholder, buy-interviews placeholder, usage panel, and local-key panel.
+- `next.config.mjs` now allows same-origin microphone access with `microphone=(self)` while keeping camera and geolocation disabled.
 - User-owned Deepgram keys are handled only in browser `localStorage` and active websocket payloads.
 - Existing app auth uses Better Auth via `auth.api.getSession({ headers })`.
 - Existing Study Tracker UI uses the shared shell at `app/(study)/study-tracker/layout.js`.

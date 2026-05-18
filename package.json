@@ -17,6 +17,7 @@
     "postbuild": "next-sitemap"
   },
   "dependencies": {
+    "@qa-playground/interview-core": "workspace:*",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@radix-ui/react-accordion": "^1.2.12",
