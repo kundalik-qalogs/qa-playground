@@ -1,50 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
-  AlertCircle,
   BarChart3,
-  Bot,
-  Check,
-  Clock3,
-  FileText,
   History,
-  KeyRound,
   Loader2,
   Lock,
   LogIn,
-  MessageSquareText,
   Mic,
-  Play,
   RefreshCw,
   Settings,
-  ShoppingCart,
   Signal,
-  Square,
-  Trash2,
 } from "lucide-react";
-import {
-  INTERVIEW_DURATIONS,
-  INTERVIEW_QUESTION_LIMITS,
-} from "@qa-playground/interview-core";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTracker } from "../_components/StudyTrackerProvider";
+import AnalyticsView from "./_components/AnalyticsView";
+import HistoryView from "./_components/HistoryView";
+import InterviewSetupView from "./_components/InterviewSetupView";
+import SessionView from "./_components/SessionView";
+import SettingsView from "./_components/SettingsView";
 
 const LOCAL_DEEPGRAM_KEY = "qa_interview_deepgram_key";
 const DEEPGRAM_AUDIO_SAMPLE_RATE = 24000;
 const DEFAULT_FOCUS =
-  "Ask one interview question at a time, wait for my answer, then give concise feedback before the next question. Mix practical QA, automation, and follow-up questions.";
+  "I want a realistic QA automation interview. Ask practical questions about Playwright, API testing, debugging flaky tests, CI/CD, test strategy, and real project scenarios. Include follow-up questions when my answer is too short.";
 
 const TABS = [
   { id: "interview", label: "Interview", icon: Mic },
@@ -54,34 +33,13 @@ const TABS = [
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
+const SHOW_DEEPGRAM_SETTINGS = false;
+const SHOW_BUY_CARD = true;
+
 function maskKey(value) {
   if (!value) return "";
   if (value.length <= 8) return "saved";
   return `Saved locally: ${value.slice(0, 4)}...${value.slice(-4)}`;
-}
-
-function formatDate(value) {
-  if (!value) return "Not started";
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function formatInterviewElapsed(session) {
-  if (!session?.startedAt) return `0 min / ${session?.durationMinutes ?? 0} min`;
-
-  const startedMs = new Date(session.startedAt).getTime();
-  const endedMs = session.endedAt ? new Date(session.endedAt).getTime() : Date.now();
-  const elapsedMinutes = Math.max(
-    0,
-    Math.min(
-      Number(session.durationMinutes || 0),
-      Math.ceil((endedMs - startedMs) / 60000),
-    ),
-  );
-
-  return `${elapsedMinutes} min / ${session.durationMinutes} min`;
 }
 
 function updateUrl(tab, id = "") {
@@ -230,6 +188,197 @@ export default function InterviewPracticePage() {
     [currentSession?.id, user],
   );
 
+  const stopMicrophoneCapture = useCallback(() => {
+    captureProcessorRef.current?.disconnect();
+    captureProcessorRef.current = null;
+    captureContextRef.current?.close().catch(() => {});
+    captureContextRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+    setMicStatus("Stopped");
+  }, []);
+
+  const stopLiveSession = useCallback(() => {
+    stopMicrophoneCapture();
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "End" }));
+      wsRef.current.close(1000, "user_ended");
+    }
+    wsRef.current = null;
+    nextPlaybackTimeRef.current = 0;
+  }, [stopMicrophoneCapture]);
+
+  const startMicrophoneCapture = useCallback(async (socket) => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+    mediaStreamRef.current = stream;
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const audioContext = new AudioContextClass({
+      sampleRate: DEEPGRAM_AUDIO_SAMPLE_RATE,
+    });
+    captureContextRef.current = audioContext;
+
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    captureProcessorRef.current = processor;
+    processor.onaudioprocess = (event) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      const input = event.inputBuffer.getChannelData(0);
+      socket.send(floatTo16BitPcm(input));
+    };
+
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+    setMicStatus("Live");
+  }, []);
+
+  const playPcmAudio = useCallback((arrayBuffer) => {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!playbackContextRef.current) {
+      playbackContextRef.current = new AudioContextClass({
+        sampleRate: DEEPGRAM_AUDIO_SAMPLE_RATE,
+      });
+    }
+    const audioContext = playbackContextRef.current;
+    const pcm = new Int16Array(arrayBuffer);
+    const audioBuffer = audioContext.createBuffer(
+      1,
+      pcm.length,
+      DEEPGRAM_AUDIO_SAMPLE_RATE,
+    );
+    const channel = audioBuffer.getChannelData(0);
+    for (let i = 0; i < pcm.length; i += 1) {
+      channel[i] = Math.max(-1, Math.min(1, pcm[i] / 32768));
+    }
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
+
+    const leadTime = 0.08;
+    const currentTime = audioContext.currentTime;
+    if (nextPlaybackTimeRef.current < currentTime + leadTime) {
+      nextPlaybackTimeRef.current = currentTime + leadTime;
+    }
+
+    source.start(nextPlaybackTimeRef.current);
+    nextPlaybackTimeRef.current += audioBuffer.duration;
+  }, []);
+
+  const startLiveSession = useCallback(
+    async (sessionPayload) => {
+      stopLiveSession();
+      setTranscriptMessages([]);
+      setConnectionStatus("Connecting");
+      setMicStatus("Permission pending");
+      setAgentStatus("Validating session");
+
+      const websocket = sessionPayload?.websocket;
+      const session = sessionPayload?.session;
+      const baseUrl =
+        websocket?.url || "ws://localhost:3001/interview-practice/ws";
+      const url = new URL(baseUrl);
+      url.searchParams.set("sessionId", websocket?.sessionId || session?.id);
+      url.searchParams.set("token", websocket?.token || "");
+
+      const socket = new WebSocket(url);
+      socket.binaryType = "arraybuffer";
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        setConnectionStatus("Connected");
+        setAgentStatus("Waiting for validation");
+      };
+
+      socket.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          playPcmAudio(event.data);
+          return;
+        }
+
+        let message;
+        try {
+          message = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (message.type === "SessionValidated") {
+          setAgentStatus("Starting agent");
+          if (message.session) setCurrentSession(message.session);
+          const localKey =
+            websocket?.keySource === "USER_LOCAL"
+              ? window.localStorage.getItem(LOCAL_DEEPGRAM_KEY) || ""
+              : "";
+          socket.send(
+            JSON.stringify({
+              type: "Start",
+              ...(localKey ? { deepgramApiKey: localKey } : {}),
+            }),
+          );
+        }
+        if (message.type === "DeepgramConnected") {
+          setAgentStatus("Listening");
+          startMicrophoneCapture(socket).catch((error) => {
+            setMicStatus("Mic unavailable");
+            setTranscriptMessages((prev) => [
+              ...prev,
+              {
+                id: `mic-${Date.now()}`,
+                role: "SYSTEM",
+                content:
+                  error?.message ||
+                  "Microphone capture could not be started in this browser.",
+              },
+            ]);
+          });
+        }
+        if (message.type === "Transcript" && message.message) {
+          setTranscriptMessages((prev) => [...prev, message.message]);
+          if (message.session) setCurrentSession(message.session);
+        }
+        if (message.type === "SessionEnded") {
+          setConnectionStatus("Ended");
+          setAgentStatus("Complete");
+          stopMicrophoneCapture();
+          fetchSessions();
+        }
+        if (message.type === "Error") {
+          setAgentStatus("Error");
+          setTranscriptMessages((prev) => [
+            ...prev,
+            {
+              id: `error-${Date.now()}`,
+              role: "SYSTEM",
+              content: message.message || "Realtime session error.",
+            },
+          ]);
+        }
+      };
+
+      socket.onclose = () => {
+        setConnectionStatus("Disconnected");
+        stopMicrophoneCapture();
+      };
+      socket.onerror = () => {
+        setConnectionStatus("Error");
+        setAgentStatus("Error");
+      };
+    },
+    [
+      fetchSessions,
+      playPcmAudio,
+      startMicrophoneCapture,
+      stopLiveSession,
+      stopMicrophoneCapture,
+    ],
+  );
+
   useEffect(() => {
     refreshLocalKeyState();
     syncTabFromUrl();
@@ -247,6 +396,13 @@ export default function InterviewPracticePage() {
       fetchSessionDetails(selectedSessionId);
     }
   }, [activeTab, fetchSessionDetails, selectedSessionId]);
+
+  useEffect(() => {
+    return () => {
+      stopLiveSession();
+      playbackContextRef.current?.close().catch(() => {});
+    };
+  }, [stopLiveSession]);
 
   const canUsePlatformKey = (usage?.platformFreeInterviewsRemaining ?? 0) > 0;
   const requiresLocalKey = Number(durationMinutes) === 15 || !canUsePlatformKey;
@@ -358,202 +514,6 @@ export default function InterviewPracticePage() {
     }
   };
 
-  const startLiveSession = useCallback(
-    async (sessionPayload) => {
-      stopLiveSession();
-      setTranscriptMessages([]);
-      setConnectionStatus("Connecting");
-      setMicStatus("Permission pending");
-      setAgentStatus("Validating session");
-
-      const websocket = sessionPayload?.websocket;
-      const session = sessionPayload?.session;
-      const baseUrl =
-        websocket?.url || "ws://localhost:3001/interview-practice/ws";
-      const url = new URL(baseUrl);
-      url.searchParams.set("sessionId", websocket?.sessionId || session?.id);
-      url.searchParams.set("token", websocket?.token || "");
-
-      const socket = new WebSocket(url);
-      socket.binaryType = "arraybuffer";
-      wsRef.current = socket;
-
-      socket.onopen = () => {
-        setConnectionStatus("Connected");
-        setAgentStatus("Waiting for validation");
-      };
-
-      socket.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          playPcmAudio(event.data);
-          return;
-        }
-
-        let message;
-        try {
-          message = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-
-        if (message.type === "SessionValidated") {
-          setAgentStatus("Starting agent");
-          if (message.session) setCurrentSession(message.session);
-          const localKey =
-            websocket?.keySource === "USER_LOCAL"
-              ? window.localStorage.getItem(LOCAL_DEEPGRAM_KEY) || ""
-              : "";
-          socket.send(
-            JSON.stringify({
-              type: "Start",
-              ...(localKey ? { deepgramApiKey: localKey } : {}),
-            }),
-          );
-        }
-        if (message.type === "DeepgramConnected") {
-          setAgentStatus("Listening");
-          startMicrophoneCapture(socket).catch((error) => {
-            setMicStatus("Mic unavailable");
-            setTranscriptMessages((prev) => [
-              ...prev,
-              {
-                id: `mic-${Date.now()}`,
-                role: "SYSTEM",
-                content:
-                  error?.message ||
-                  "Microphone capture could not be started in this browser.",
-              },
-            ]);
-          });
-        }
-        if (message.type === "Transcript" && message.message) {
-          setTranscriptMessages((prev) => [...prev, message.message]);
-          if (message.session) setCurrentSession(message.session);
-        }
-        if (message.type === "SessionEnded") {
-          setConnectionStatus("Ended");
-          setAgentStatus("Complete");
-          stopMicrophoneCapture();
-          fetchSessions();
-        }
-        if (message.type === "Error") {
-          setAgentStatus("Error");
-          setTranscriptMessages((prev) => [
-            ...prev,
-            {
-              id: `error-${Date.now()}`,
-              role: "SYSTEM",
-              content: message.message || "Realtime session error.",
-            },
-          ]);
-        }
-      };
-
-      socket.onclose = () => {
-        setConnectionStatus("Disconnected");
-        stopMicrophoneCapture();
-      };
-      socket.onerror = () => {
-        setConnectionStatus("Error");
-        setAgentStatus("Error");
-      };
-    },
-    [fetchSessions],
-  );
-
-  const stopLiveSession = useCallback(() => {
-    stopMicrophoneCapture();
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "End" }));
-      wsRef.current.close(1000, "user_ended");
-    }
-    wsRef.current = null;
-    nextPlaybackTimeRef.current = 0;
-  }, []);
-
-  const stopMicrophoneCapture = useCallback(() => {
-    captureProcessorRef.current?.disconnect();
-    captureProcessorRef.current = null;
-    captureContextRef.current?.close().catch(() => {});
-    captureContextRef.current = null;
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
-    setMicStatus("Stopped");
-  }, []);
-
-  const startMicrophoneCapture = useCallback(
-    async (socket) => {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
-      mediaStreamRef.current = stream;
-
-      const AudioContextClass =
-        window.AudioContext || window.webkitAudioContext;
-      const audioContext = new AudioContextClass({
-        sampleRate: DEEPGRAM_AUDIO_SAMPLE_RATE,
-      });
-      captureContextRef.current = audioContext;
-
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      captureProcessorRef.current = processor;
-      processor.onaudioprocess = (event) => {
-        if (socket.readyState !== WebSocket.OPEN) return;
-        const input = event.inputBuffer.getChannelData(0);
-        socket.send(floatTo16BitPcm(input));
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      setMicStatus("Live");
-    },
-    [],
-  );
-
-  const playPcmAudio = useCallback((arrayBuffer) => {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!playbackContextRef.current) {
-      playbackContextRef.current = new AudioContextClass({
-        sampleRate: DEEPGRAM_AUDIO_SAMPLE_RATE,
-      });
-    }
-    const audioContext = playbackContextRef.current;
-    const pcm = new Int16Array(arrayBuffer);
-    const audioBuffer = audioContext.createBuffer(
-      1,
-      pcm.length,
-      DEEPGRAM_AUDIO_SAMPLE_RATE,
-    );
-    const channel = audioBuffer.getChannelData(0);
-    for (let i = 0; i < pcm.length; i += 1) {
-      channel[i] = Math.max(-1, Math.min(1, pcm[i] / 32768));
-    }
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-
-    const leadTime = 0.08;
-    const currentTime = audioContext.currentTime;
-    if (nextPlaybackTimeRef.current < currentTime + leadTime) {
-      nextPlaybackTimeRef.current = currentTime + leadTime;
-    }
-
-    source.start(nextPlaybackTimeRef.current);
-    nextPlaybackTimeRef.current += audioBuffer.duration;
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      stopLiveSession();
-      playbackContextRef.current?.close().catch(() => {});
-    };
-  }, [stopLiveSession]);
-
   if (!sessionPending && !user) {
     return (
       <div className="flex items-center justify-center min-h-[420px]">
@@ -610,32 +570,35 @@ export default function InterviewPracticePage() {
             }}
             disabled={usageLoading || sessionsLoading}
           >
-            {usageLoading || sessionsLoading ? (
-              <Loader2 size={15} className="animate-spin" />
-            ) : (
-              <RefreshCw size={15} />
-            )}
+            <RefreshCw
+              size={15}
+              className={usageLoading || sessionsLoading ? "animate-spin" : ""}
+            />
             Refresh
           </Button>
         </div>
       </div>
 
-      <nav className="bg-white border border-[#e9eaed] rounded-xl p-1 flex gap-1 overflow-x-auto">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => navigateTab(tab.id, tab.id === "analytics" ? selectedSessionId : "")}
-            className={`h-10 px-4 rounded-lg text-sm font-medium flex items-center gap-2 whitespace-nowrap transition-colors ${
-              activeTab === tab.id
-                ? "bg-blue-600 text-white"
-                : "text-gray-600 hover:bg-[#f3f6fb] hover:text-[#111827]"
-            }`}
-          >
-            <tab.icon size={15} />
-            {tab.label}
-          </button>
-        ))}
+      <nav className="flex gap-2 overflow-x-auto border-b border-[#e9eaed] pb-2">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => navigateTab(tab.id)}
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                isActive
+                  ? "bg-blue-600 text-white"
+                  : "bg-white text-gray-600 hover:text-blue-600 border border-[#e9eaed]"
+              }`}
+            >
+              <Icon size={15} />
+              {tab.label}
+            </button>
+          );
+        })}
       </nav>
 
       {activeTab === "interview" && (
@@ -660,7 +623,7 @@ export default function InterviewPracticePage() {
 
       {activeTab === "session" && (
         <SessionView
-          session={selectedSession || currentSession}
+          session={currentSession}
           durationMinutes={durationMinutes}
           questionLimit={questionLimit}
           connectionStatus={connectionStatus}
@@ -707,782 +670,10 @@ export default function InterviewPracticePage() {
           setKeyInput={setKeyInput}
           onSaveKey={handleSaveKey}
           onRemoveKey={handleRemoveKey}
+          showDeepgramSettings={SHOW_DEEPGRAM_SETTINGS}
+          showBuyCard={SHOW_BUY_CARD}
         />
       )}
-    </div>
-  );
-}
-
-function InterviewSetupView({
-  role,
-  setRole,
-  companyStyle,
-  setCompanyStyle,
-  focus,
-  setFocus,
-  durationMinutes,
-  setDurationMinutes,
-  questionLimit,
-  setQuestionLimit,
-  selectedKeySource,
-  sessionCreateError,
-  sessionCreateLoading,
-  onStart,
-  onOpenSettings,
-}) {
-  return (
-    <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between mb-5">
-        <div>
-          <h2 className="text-base font-semibold text-[#1f2937] m-0">
-            Interview Setup
-          </h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Choose the target role and interview constraints before starting.
-          </p>
-        </div>
-        <Badge
-          variant="outline"
-          className={
-            selectedKeySource === "PLATFORM"
-              ? "border-[#dbeafe] bg-[#eff2ff] text-blue-600"
-              : "border-[#dcfce7] bg-[#f0fdf4] text-green-700"
-          }
-        >
-          {selectedKeySource === "PLATFORM"
-            ? "Platform key"
-            : "Local key required"}
-        </Badge>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-5">
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="interview-role">Target role</Label>
-            <Input
-              id="interview-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              placeholder="QA Automation Engineer"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="interview-company-style">Company style</Label>
-            <Input
-              id="interview-company-style"
-              value={companyStyle}
-              onChange={(e) => setCompanyStyle(e.target.value)}
-              placeholder="Startup, enterprise, fintech, SaaS..."
-            />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="interview-duration">Duration</Label>
-              <Select value={durationMinutes} onValueChange={setDurationMinutes}>
-                <SelectTrigger id="interview-duration">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {INTERVIEW_DURATIONS.map((duration) => (
-                    <SelectItem key={duration} value={String(duration)}>
-                      {duration} minutes
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="interview-question-limit">Question limit</Label>
-              <Select value={questionLimit} onValueChange={setQuestionLimit}>
-                <SelectTrigger id="interview-question-limit">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {INTERVIEW_QUESTION_LIMITS.map((limit) => (
-                    <SelectItem key={limit} value={String(limit)}>
-                      {limit} questions
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="interview-focus">Interview focus</Label>
-          <Textarea
-            id="interview-focus"
-            value={focus}
-            onChange={(e) => setFocus(e.target.value)}
-            className="min-h-[220px] resize-y"
-            placeholder="What should the interviewer focus on?"
-          />
-        </div>
-      </div>
-
-      {sessionCreateError && (
-        <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          <AlertCircle size={15} />
-          {sessionCreateError}
-        </div>
-      )}
-
-      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          className="text-xs text-blue-600 hover:text-blue-700 text-left"
-        >
-          Manage Deepgram key and free quota in Settings
-        </button>
-        <Button
-          type="button"
-          className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
-          onClick={onStart}
-          disabled={sessionCreateLoading}
-        >
-          {sessionCreateLoading ? (
-            <Loader2 size={15} className="animate-spin" />
-          ) : (
-            <Play size={15} />
-          )}
-          Start session
-        </Button>
-      </div>
-    </section>
-  );
-}
-
-function SessionView({
-  session,
-  durationMinutes,
-  questionLimit,
-  connectionStatus,
-  micStatus,
-  agentStatus,
-  transcriptMessages,
-  onEnd,
-  onBackToSetup,
-  onOpenHistory,
-  onOpenAnalytics,
-}) {
-  const liveTranscriptRef = useRef(null);
-  const isSessionActive = ["CREATED", "ACTIVE", "SUMMARIZING"].includes(
-    session?.status,
-  );
-  const statusCards = [
-    {
-      label: "Connection",
-      value: session ? connectionStatus : "No session",
-      icon: Signal,
-    },
-    { label: "Mic", value: micStatus, icon: Mic },
-    { label: "Agent", value: agentStatus, icon: Bot },
-    {
-      label: "Timer",
-      value: `${session?.durationMinutes ?? durationMinutes}:00`,
-      icon: Clock3,
-    },
-    {
-      label: "Questions",
-      value: `${session?.questionCount ?? 0} / ${session?.questionLimit ?? questionLimit}`,
-      icon: MessageSquareText,
-    },
-  ];
-
-  useEffect(() => {
-    if (!liveTranscriptRef.current) return;
-    liveTranscriptRef.current.scrollTop = liveTranscriptRef.current.scrollHeight;
-  }, [transcriptMessages.length]);
-
-  return (
-    <div className="space-y-4">
-      {!session ? (
-        <section className="bg-white border border-[#e9eaed] rounded-xl p-8 text-center">
-          <h2 className="text-lg font-semibold text-[#111827] m-0">
-            No active session
-          </h2>
-          <p className="text-sm text-gray-500 mt-2 mb-5">
-            Start from the Interview tab to create a session.
-          </p>
-          <Button type="button" onClick={onBackToSetup}>
-            Go to Interview
-          </Button>
-        </section>
-      ) : (
-        <>
-          <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-[#1f2937] m-0">
-                  Live Session
-                </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  {session.role} at {session.companyStyle}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="bg-white">
-                  {session.id}
-                </Badge>
-                {isSessionActive ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="gap-2 text-red-600 hover:text-red-700"
-                    onClick={onEnd}
-                  >
-                    <Square size={14} />
-                    End session
-                  </Button>
-                ) : (
-                  <Badge className="bg-green-50 text-green-700 border border-green-200">
-                    Session closed
-                  </Badge>
-                )}
-              </div>
-            </div>
-            {!isSessionActive && (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
-                This session is already {String(session.status).toLowerCase()}.
-                Live controls are disabled. Open History or Analytics to review
-                the completed attempt.
-              </div>
-            )}
-          </section>
-
-          <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {statusCards.map((item) => (
-              <div
-                key={item.label}
-                className="bg-white border border-[#e9eaed] rounded-xl p-3 min-h-[86px]"
-              >
-                <div className="flex items-center gap-2 text-gray-400 mb-2">
-                  <item.icon size={15} />
-                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.7px] m-0">
-                    {item.label}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold text-[#1f2937] m-0">
-                  {item.value}
-                </p>
-              </div>
-            ))}
-          </section>
-
-          <section className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.75fr] gap-4">
-            <div className="bg-white border border-[#e9eaed] rounded-xl p-5 min-h-[410px]">
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <div>
-                  <h2 className="text-base font-semibold text-[#1f2937] m-0">
-                    Interview Room
-                  </h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Realtime audio and transcript stream will attach here.
-                  </p>
-                </div>
-                <Mic size={18} className="text-gray-400" />
-              </div>
-              <div className="rounded-lg border border-dashed border-[#d8dde5] bg-[#fafbfc] min-h-[300px] flex items-center justify-center px-6 text-center">
-                {transcriptMessages.length === 0 ? (
-                  <div className="space-y-3">
-                    <p className="text-sm text-gray-500 m-0">
-                      {isSessionActive
-                        ? "Waiting for Deepgram transcript events."
-                        : "This session is no longer active."}
-                    </p>
-                    {!isSessionActive && (
-                      <div className="flex flex-wrap justify-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={onOpenHistory}
-                        >
-                          View history
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => onOpenAnalytics(session.id)}
-                        >
-                          View analytics
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div
-                    ref={liveTranscriptRef}
-                    className="w-full h-full max-h-[300px] overflow-y-auto space-y-3 text-left pr-1"
-                  >
-                    {transcriptMessages.map((message, index) => (
-                      <div
-                        key={message.id || `${message.sequence}-${index}`}
-                        className="rounded-lg border border-[#eef0f3] bg-white p-3"
-                      >
-                        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.7px] text-gray-400 m-0 mb-1">
-                          {message.role}
-                        </p>
-                        <p className="text-sm text-[#1f2937] m-0">
-                          {message.content}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white border border-[#e9eaed] rounded-xl p-5">
-              <h2 className="text-base font-semibold text-[#1f2937] m-0 mb-3">
-                Session Details
-              </h2>
-              <dl className="space-y-3 text-sm">
-                <Detail label="Status" value={session.status} />
-                <Detail label="Key source" value={session.keySource} />
-                <Detail label="Started" value={formatDate(session.startedAt)} />
-                <Detail label="Created" value={formatDate(session.createdAt)} />
-              </dl>
-            </div>
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-function HistoryView({ sessions, loading, error, onRefresh, onAnalytics }) {
-  return (
-    <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <div>
-          <h2 className="text-base font-semibold text-[#1f2937] m-0">
-            Session History
-          </h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Review previous interview sessions and open analytics by ID.
-          </p>
-        </div>
-        <Button type="button" variant="outline" className="gap-2" onClick={onRefresh}>
-          <RefreshCw size={15} />
-          Refresh history
-        </Button>
-      </div>
-
-      {error && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          <AlertCircle size={15} />
-          {error}
-        </div>
-      )}
-
-      <div className="overflow-x-auto rounded-lg border border-[#e9eaed]">
-        <table className="w-full min-w-[820px] text-sm">
-          <thead className="bg-[#f8fafc] text-left text-[0.68rem] uppercase tracking-[0.7px] text-gray-400">
-            <tr>
-              <th className="px-4 py-3 font-semibold">ID</th>
-              <th className="px-4 py-3 font-semibold">Role</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
-              <th className="px-4 py-3 font-semibold">Duration</th>
-              <th className="px-4 py-3 font-semibold">Questions</th>
-              <th className="px-4 py-3 font-semibold">Created</th>
-              <th className="px-4 py-3 font-semibold text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#eef0f3]">
-            {loading ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                  Loading history...
-                </td>
-              </tr>
-            ) : sessions.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                  No interview sessions yet.
-                </td>
-              </tr>
-            ) : (
-              sessions.map((session) => (
-                <tr key={session.id} className="bg-white">
-                  <td className="px-4 py-3 font-mono text-xs text-[#111827]">
-                    {session.id}
-                  </td>
-                  <td className="px-4 py-3 text-[#1f2937]">{session.role}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant="outline" className="bg-white">
-                      {session.status}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">{session.durationMinutes} min</td>
-                  <td className="px-4 py-3">
-                    {session.questionCount} / {session.questionLimit}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {formatDate(session.createdAt)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="gap-2"
-                      onClick={() => onAnalytics(session.id)}
-                    >
-                      <BarChart3 size={14} />
-                      Analytics
-                    </Button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function AnalyticsView({
-  session,
-  selectedSessionId,
-  messages,
-  messagesLoading,
-  messagesError,
-  onOpenHistory,
-}) {
-  const analyticsTranscriptRef = useRef(null);
-
-  useEffect(() => {
-    if (!analyticsTranscriptRef.current) return;
-    analyticsTranscriptRef.current.scrollTop =
-      analyticsTranscriptRef.current.scrollHeight;
-  }, [messages.length]);
-
-  if (!selectedSessionId) {
-    return (
-      <section className="bg-white border border-[#e9eaed] rounded-xl p-8 text-center">
-        <h2 className="text-lg font-semibold text-[#111827] m-0">
-          Select a session
-        </h2>
-        <p className="text-sm text-gray-500 mt-2 mb-5">
-          Open analytics from the History table to load `?tab=analytics&id=...`.
-        </p>
-        <Button type="button" onClick={onOpenHistory}>
-          Go to History
-        </Button>
-      </section>
-    );
-  }
-
-  if (!session) {
-    return (
-      <section className="bg-white border border-[#e9eaed] rounded-xl p-8 text-center">
-        <h2 className="text-lg font-semibold text-[#111827] m-0">
-          Analytics not found
-        </h2>
-        <p className="text-sm text-gray-500 mt-2 mb-5">
-          Session `{selectedSessionId}` is not in the current history list.
-        </p>
-        <Button type="button" onClick={onOpenHistory}>
-          Back to History
-        </Button>
-      </section>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-[#1f2937] m-0">
-              Session Analytics
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Analysis for <span className="font-mono">{session.id}</span>
-            </p>
-          </div>
-          <Badge variant="outline" className="bg-white">
-            {session.status}
-          </Badge>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <Metric label="Interview time" value={formatInterviewElapsed(session)} />
-        <Metric label="Questions" value={`${session.questionCount} / ${session.questionLimit}`} />
-        <Metric label="Key source" value={session.keySource} />
-        <Metric label="Ended" value={session.endedAt ? "Yes" : "No"} />
-      </section>
-
-      <section className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-4">
-        <div className="bg-white border border-[#e9eaed] rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-[#1f2937] m-0">
-              Summary
-            </h3>
-            <FileText size={18} className="text-gray-400" />
-          </div>
-          <p className="text-sm text-gray-600 leading-relaxed m-0">
-            {session.summary ||
-              "Summary will appear here after transcript persistence and feedback generation are wired."}
-          </p>
-        </div>
-        <div className="bg-white border border-[#e9eaed] rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-[#1f2937] m-0">
-              Feedback
-            </h3>
-            <BarChart3 size={18} className="text-gray-400" />
-          </div>
-          <div className="rounded-lg border border-[#eef0f3] bg-[#fafbfc] p-3 text-sm text-gray-600">
-            {session.feedback
-              ? JSON.stringify(session.feedback)
-              : "Structured feedback is pending for this session."}
-          </div>
-        </div>
-      </section>
-
-      <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between mb-4">
-          <div>
-            <h3 className="text-base font-semibold text-[#1f2937] m-0">
-              Transcript
-            </h3>
-            <p className="text-sm text-gray-500 mt-1">
-              Candidate and AI messages from this interview session.
-            </p>
-          </div>
-          <Badge variant="outline" className="bg-white">
-            {messages.length} messages
-          </Badge>
-        </div>
-
-        {messagesError && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            <AlertCircle size={15} />
-            {messagesError}
-          </div>
-        )}
-
-        <div className="min-h-[260px] rounded-lg border border-[#e9eaed] bg-[#fafbfc] p-4">
-          {messagesLoading ? (
-            <div className="flex items-center justify-center min-h-[220px] text-sm text-gray-500">
-              <Loader2 size={16} className="animate-spin mr-2" />
-              Loading transcript...
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex items-center justify-center min-h-[220px] text-sm text-gray-500 text-center">
-              No transcript messages were saved for this session yet.
-            </div>
-          ) : (
-            <div
-              ref={analyticsTranscriptRef}
-              className="max-h-[420px] overflow-y-auto space-y-3 pr-1"
-            >
-              {messages.map((message) => {
-                const isUser = message.role === "USER";
-                const isAi = message.role === "INTERVIEWER";
-                const label = isUser ? "Candidate" : isAi ? "AI interviewer" : "System";
-                return (
-                  <div
-                    key={message.id}
-                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[82%] rounded-xl border px-4 py-3 ${
-                        isUser
-                          ? "border-blue-200 bg-blue-50 text-blue-950"
-                          : isAi
-                            ? "border-[#e5e7eb] bg-white text-[#1f2937]"
-                            : "border-amber-200 bg-amber-50 text-amber-900"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3 mb-1">
-                        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.7px] text-gray-400 m-0">
-                          {label}
-                        </p>
-                        <p className="text-[0.68rem] text-gray-400 m-0">
-                          {message.occurredAt ? formatDate(message.occurredAt) : ""}
-                        </p>
-                      </div>
-                      <p className="text-sm leading-relaxed m-0">
-                        {message.content}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function SettingsView({
-  usage,
-  usageLoading,
-  usageError,
-  accessHint,
-  hasLocalKey,
-  maskedKey,
-  keyInput,
-  setKeyInput,
-  onSaveKey,
-  onRemoveKey,
-}) {
-  return (
-    <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr] gap-4">
-      <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div>
-            <h2 className="text-base font-semibold text-[#1f2937] m-0">
-              Free Interview Usage
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Platform key access is limited to two 10 minute interviews.
-            </p>
-          </div>
-          <Badge className="bg-[#eff2ff] text-blue-600 border-transparent">
-            {usage?.plan ?? "FREE"}
-          </Badge>
-        </div>
-
-        {usageError ? (
-          <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            <AlertCircle size={15} />
-            {usageError}
-          </div>
-        ) : usageLoading && !usage ? (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Loader2 size={15} className="animate-spin" />
-            Loading usage...
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-3">
-            <Metric label="Limit" value={usage?.platformFreeInterviewsLimit ?? 2} />
-            <Metric label="Used" value={usage?.platformFreeInterviewsUsed ?? 0} />
-            <Metric label="Left" value={usage?.platformFreeInterviewsRemaining ?? 0} />
-          </div>
-        )}
-
-        <div className="mt-4 rounded-lg border border-[#e9eaed] bg-white px-3 py-3 text-sm text-gray-600">
-          {accessHint}
-        </div>
-      </section>
-
-      <section className="bg-white border border-[#e9eaed] rounded-xl p-5">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div>
-            <h2 className="text-base font-semibold text-[#1f2937] m-0">
-              Local Deepgram Key
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Stored only in this browser and sent only for an active user-key
-              call.
-            </p>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-[#f8fafc] border border-[#e9eaed] text-gray-500 flex items-center justify-center">
-            <KeyRound size={17} />
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-[#eef0f3] bg-[#fafbfc] px-3 py-3 mb-4">
-          <div className="flex items-center gap-2">
-            <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                hasLocalKey ? "bg-green-500" : "bg-gray-300"
-              }`}
-            />
-            <p className="text-sm font-medium text-[#1f2937] m-0">
-              {hasLocalKey ? "Local key saved" : "No local key saved"}
-            </p>
-          </div>
-          {hasLocalKey && (
-            <p className="text-xs text-gray-500 mt-1 mb-0">{maskedKey}</p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="deepgram-local-key">Deepgram API key</Label>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Input
-              id="deepgram-local-key"
-              type="password"
-              value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
-              placeholder="Paste your Deepgram API key"
-              autoComplete="off"
-            />
-            <Button
-              type="button"
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={onSaveKey}
-            >
-              <Check size={15} />
-              Save
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="text-red-600 hover:text-red-700 dark:text-red-500"
-              onClick={onRemoveKey}
-              disabled={!hasLocalKey}
-            >
-              <Trash2 size={15} />
-              Remove
-            </Button>
-          </div>
-          <p className="text-xs text-gray-500 m-0">
-            This key is not sent to `/api/interview-practice/*` and is not saved
-            in the database.
-          </p>
-        </div>
-
-        <div className="mt-5 rounded-lg border border-[#fed7aa] bg-[#fff7ed] p-4">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-lg bg-white text-orange-600 flex items-center justify-center shrink-0">
-              <ShoppingCart size={17} />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[#1f2937] m-0">
-                Buy Interviews
-              </h3>
-              <p className="text-sm text-gray-600 mt-1 mb-3">
-                Paid interview packs are planned after the realtime V1 flow is
-                stable.
-              </p>
-              <Button type="button" variant="outline" disabled>
-                Coming soon
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Metric({ label, value }) {
-  return (
-    <div className="rounded-lg border border-[#eef0f3] bg-[#fafbfc] p-3">
-      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.7px] text-gray-400 m-0">
-        {label}
-      </p>
-      <p className="font-mono text-xl font-bold text-[#111827] m-0 mt-1">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function Detail({ label, value }) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-[#eef0f3] pb-3 last:border-b-0">
-      <dt className="text-gray-500">{label}</dt>
-      <dd className="text-right font-medium text-[#111827]">{value || "-"}</dd>
     </div>
   );
 }

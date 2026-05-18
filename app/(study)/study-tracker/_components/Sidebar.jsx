@@ -1,6 +1,8 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+import { getSyllabusStats } from "@/lib/studyTrackerStorage";
+import { cn } from "@/lib/utils";
 import {
   ChevronDown,
   ChevronsLeft,
@@ -8,12 +10,10 @@ import {
   LogIn,
   LogOut,
 } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { authClient } from "@/lib/auth-client";
-import { getSyllabusStats } from "@/lib/studyTrackerStorage";
-import { useTracker } from "./StudyTrackerProvider";
-import { cn } from "@/lib/utils";
 import NavBtn from "./NavBtn";
+import { useTracker } from "./StudyTrackerProvider";
 
 const NAV_ITEMS = [
   {
@@ -43,10 +43,14 @@ const NAV_ITEMS = [
   {
     id: "interview-practice",
     label: "Interview Practice",
-    icon: "IV",
+    icon: "🎙️",
     href: "/study-tracker/interview-practice",
   },
 ];
+
+// Temporary feature flag to hide syllabi in the sidebar
+// Set to `true` to show them again.
+const SHOW_SYLLABI = false;
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { state, user } = useTracker();
@@ -109,7 +113,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             />
           ))}
 
-          {state && (
+          {state && SHOW_SYLLABI && (
             <>
               {!collapsed && (
                 <li>
