@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import {
   Sheet,
   SheetContent,
@@ -84,7 +84,20 @@ const CHROME_EXTENSIONS = [
   },
 ];
 
+const subscribeToClientMount = (onStoreChange) => {
+  const timer = window.setTimeout(onStoreChange, 0);
+  return () => window.clearTimeout(timer);
+};
+
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
+
 const SheetOpen = ({ children }) => {
+  const mounted = useSyncExternalStore(
+    subscribeToClientMount,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
   const [open, setOpen] = useState(false);
   const { data: session, isPending } = authClient.useSession();
   const user = session?.user ?? null;
@@ -97,6 +110,10 @@ const SheetOpen = ({ children }) => {
     close();
     router.push("/login");
   };
+
+  if (!mounted) {
+    return children;
+  }
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>

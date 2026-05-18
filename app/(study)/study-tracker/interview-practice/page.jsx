@@ -412,6 +412,21 @@ export default function InterviewPracticePage() {
     return sessions.find((session) => session.id === selectedSessionId) || null;
   }, [currentSession, selectedSessionId, sessions]);
 
+  const handleSessionUpdated = useCallback(
+    (updatedSession) => {
+      if (!updatedSession?.id) return;
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.id === updatedSession.id ? updatedSession : session,
+        ),
+      );
+      if (currentSession?.id === updatedSession.id) {
+        setCurrentSession(updatedSession);
+      }
+    },
+    [currentSession?.id],
+  );
+
   const accessHint = useMemo(() => {
     if (canUsePlatformKey) {
       return "Your next 10 minute interview can use the platform Deepgram key.";
@@ -655,6 +670,7 @@ export default function InterviewPracticePage() {
           messagesLoading={selectedSessionLoading}
           messagesError={selectedSessionError}
           onOpenHistory={() => navigateTab("history")}
+          onSessionUpdated={handleSessionUpdated}
         />
       )}
 

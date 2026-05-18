@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { INTERVIEW_END_REASONS } from "@qa-playground/interview-core";
 import { prisma } from "@/lib/prisma";
 import { sanitizeSession } from "@/lib/interview-practice/api";
+import { finalizeInterviewSessionWithReview } from "@/lib/interview-practice/review";
 import { forbidden, isInternalWsRequest } from "../_internal";
 
 export async function POST(request) {
@@ -25,7 +26,11 @@ export async function POST(request) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  if (["COMPLETED", "ENDED_BY_USER", "FAILED"].includes(session.status)) {
+  if (
+    ["SUMMARIZING", "COMPLETED", "ENDED_BY_USER", "FAILED"].includes(
+      session.status,
+    )
+  ) {
     return NextResponse.json({ session: sanitizeSession(session) });
   }
 
@@ -36,14 +41,15 @@ export async function POST(request) {
         ? "FAILED"
         : "COMPLETED";
 
-  const updatedSession = await prisma.interviewPracticeSession.update({
-    where: { id: session.id },
-    data: {
-      status,
-      endedAt: new Date(),
+  const { session: updatedSession, reviewError } =
+    await finalizeInterviewSessionWithReview({
+      session,
+      finalStatus: status,
       endReason: reason,
-    },
-  });
+    });
 
-  return NextResponse.json({ session: sanitizeSession(updatedSession) });
+  return NextResponse.json({
+    session: sanitizeSession(updatedSession),
+    ...(reviewError ? { reviewError } : {}),
+  });
 }

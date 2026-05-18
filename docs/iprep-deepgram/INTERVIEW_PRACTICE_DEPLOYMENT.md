@@ -38,9 +38,15 @@ Set these on the Next.js app deployment:
 ```bash
 DATABASE_URL="postgresql://..."
 DEEPGRAM_API_KEY="dg_platform_key_for_free_interviews"
+OPENAI_API_KEY="sk-..."
+OPENAI_MODEL="gpt-5.2"
 INTERVIEW_WS_URL="wss://your-interview-ws.example.com/interview-practice/ws"
 INTERVIEW_WS_INTERNAL_SECRET="generate-a-long-random-secret"
 ```
+
+`OPENAI_MODEL` is optional and defaults to `gpt-5.2`. The OpenAI key is used
+server-side only to generate the final markdown summary and structured feedback
+after an interview ends.
 
 Recommended existing app env vars should remain unchanged, including Better Auth
 and any production base URL settings already used by the project.

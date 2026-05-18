@@ -6,8 +6,9 @@ import {
   sanitizeSession,
   unauthorized,
 } from "@/lib/interview-practice/api";
+import { finalizeInterviewSessionWithReview } from "@/lib/interview-practice/review";
 
-const ENDABLE_STATUSES = new Set(["CREATED", "ACTIVE", "SUMMARIZING"]);
+const ENDABLE_STATUSES = new Set(["CREATED", "ACTIVE"]);
 
 export async function PATCH(request, { params }) {
   const userId = await getInterviewUserId(request);
@@ -24,14 +25,14 @@ export async function PATCH(request, { params }) {
     return NextResponse.json({ session: sanitizeSession(existing) });
   }
 
-  const session = await prisma.interviewPracticeSession.update({
-    where: { id: existing.id },
-    data: {
-      status: "ENDED_BY_USER",
-      endedAt: new Date(),
-      endReason: "user_ended",
-    },
+  const { session, reviewError } = await finalizeInterviewSessionWithReview({
+    session: existing,
+    finalStatus: "ENDED_BY_USER",
+    endReason: "user_ended",
   });
 
-  return NextResponse.json({ session: sanitizeSession(session) });
+  return NextResponse.json({
+    session: sanitizeSession(session),
+    ...(reviewError ? { reviewError } : {}),
+  });
 }

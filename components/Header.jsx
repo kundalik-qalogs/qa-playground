@@ -61,6 +61,7 @@ const Header = () => {
           <ModeToggle />
           <SheetOpen>
             <button
+              type="button"
               aria-label="Open navigation menu"
               className="rounded-md p-1 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >

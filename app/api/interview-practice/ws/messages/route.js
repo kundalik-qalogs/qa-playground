@@ -5,7 +5,15 @@ import {
 } from "@qa-playground/interview-core";
 import { prisma } from "@/lib/prisma";
 import { sanitizeMessage, sanitizeSession } from "@/lib/interview-practice/api";
+import { finalizeInterviewSessionWithReview } from "@/lib/interview-practice/review";
 import { forbidden, isInternalWsRequest } from "../_internal";
+
+const CLOSED_STATUSES = new Set([
+  "SUMMARIZING",
+  "COMPLETED",
+  "ENDED_BY_USER",
+  "FAILED",
+]);
 
 export async function POST(request) {
   if (!isInternalWsRequest(request)) return forbidden();
@@ -27,6 +35,13 @@ export async function POST(request) {
 
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  if (CLOSED_STATUSES.has(session.status)) {
+    return NextResponse.json({
+      session: sanitizeSession(session),
+      endCondition: { shouldEnd: true, reason: session.endReason },
+    });
   }
 
   const sequence = Number(message.sequence || 0);
@@ -70,20 +85,21 @@ export async function POST(request) {
     questionCount: updatedSession.questionCount,
   });
 
+  let reviewError = null;
   if (endCondition.shouldEnd) {
-    updatedSession = await prisma.interviewPracticeSession.update({
-      where: { id: session.id },
-      data: {
-        status: "COMPLETED",
-        endedAt: new Date(),
-        endReason: endCondition.reason,
-      },
+    const result = await finalizeInterviewSessionWithReview({
+      session: updatedSession,
+      finalStatus: "COMPLETED",
+      endReason: endCondition.reason,
     });
+    updatedSession = result.session;
+    reviewError = result.reviewError;
   }
 
   return NextResponse.json({
     message: sanitizeMessage(createdMessage),
     session: sanitizeSession(updatedSession),
     endCondition,
+    ...(reviewError ? { reviewError } : {}),
   });
 }
