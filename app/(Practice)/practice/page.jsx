@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import Script from "next/script";
 import PracticeClientContent from "./_components/PracticeClientContent";
 
@@ -92,6 +93,19 @@ const PracticePage = () => {
             Practice daily and level up your automation skills with real-world
             scenarios.
           </p>
+          <Link
+            href="/study-tracker/interview-practice"
+            prefetch={false}
+            className="group mx-auto mt-5 flex w-fit max-w-[calc(100%-2rem)] flex-col items-center gap-2 rounded-full border border-emerald-300 bg-emerald-500/5 px-3 py-2 text-center text-sm font-semibold text-gray-900 transition-all hover:-translate-y-0.5 hover:border-emerald-500 hover:bg-emerald-500/10 dark:border-emerald-800 dark:bg-emerald-400/10 dark:text-gray-50 sm:flex-row sm:text-left"
+          >
+            <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white">
+              2 free interviews
+            </span>
+            <span>Try AI interview practice and boost confidence today</span>
+            <span className="rounded-full bg-emerald-600 px-4 py-1.5 text-sm font-bold text-white shadow-sm shadow-emerald-900/20 transition-colors group-hover:bg-emerald-700">
+              Start now
+            </span>
+          </Link>
         </section>
 
         <section

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,6 +104,31 @@ export default function BankLoginPage() {
   };
 
   if (!mounted) return null;
+
+  const interviewPracticeBanner = (
+    <Link
+      href="/study-tracker/interview-practice"
+      prefetch={false}
+      className="group block rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-left shadow-sm shadow-emerald-900/10 transition-all hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-emerald-50 hover:shadow-lg dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50"
+    >
+      <span className="flex items-center justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+            2 free interviews
+          </span>
+          <span className="mt-1 block text-sm font-semibold text-gray-950 dark:text-white">
+            Have an interview coming up?
+          </span>
+          <span className="mt-1 block text-sm text-gray-600 dark:text-gray-300">
+            Practice with AI and boost confidence before the real call.
+          </span>
+        </span>
+        <span className="shrink-0 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm shadow-emerald-900/20 transition-colors group-hover:bg-emerald-700">
+          Start now
+        </span>
+      </span>
+    </Link>
+  );
 
   return (
     <div
@@ -414,6 +440,10 @@ export default function BankLoginPage() {
               </CardFooter>
             </Card>
           </div>
+        </div>
+
+        <div className="w-full max-w-4xl mx-auto">
+          {interviewPracticeBanner}
         </div>
 
         {/* Bottom Test Cases Section */}
